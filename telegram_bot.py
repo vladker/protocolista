@@ -225,11 +225,18 @@ def generate_summary(text: str, model: str = "gemma3:27b", timeout: int = 120) -
     }
     
     try:
-        response = requests.post(url, json=payload, timeout=timeout)
+        response = requests.post(url, json=payload, timeout=(10, timeout))  # (connect_timeout, read_timeout)
         response.raise_for_status()
         result = response.json()
         return result.get("message", {}).get("content", "")
-    except requests.exceptions.RequestException:
+    except requests.exceptions.Timeout:
+        print(f"Ollama API timeout after {timeout} seconds")
+        return None
+    except requests.exceptions.ConnectionError:
+        print("Ollama API недоступен. Убедитесь, что Ollama запущен на http://localhost:11434")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"Ошибка Ollama API: {e}")
         return None
 
 
@@ -485,11 +492,12 @@ def main():
         return
     
     # Создаем приложение с настройкой таймаута
+    # Увеличенные таймауты для обработки долгих операций (транскрипция Whisper, диаризация NeMo)
     application = (
         Application.builder()
         .token(token)
-        .connect_timeout(30)
-        .read_timeout(30)
+        .connect_timeout(600)   # 60 секунд на подключение
+        .read_timeout(3000)     # 5 минут на чтение (для долгих операций)
         .build()
     )
     
