@@ -6,3 +6,4 @@ librosa
 scikit-learn
 soundfile
 requests
+python-telegram-bot
