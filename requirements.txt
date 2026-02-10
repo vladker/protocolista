@@ -1,0 +1,8 @@
+openai-whisper
+torch
+torchaudio
+nemo_toolkit
+librosa
+scikit-learn
+soundfile
+requests
