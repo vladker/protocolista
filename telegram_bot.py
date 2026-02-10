@@ -9,6 +9,10 @@ Telegram бот для обработки аудиофайлов
 import os
 import sys
 import json
+from dotenv import load_dotenv
+
+# Загружаем переменные из .env файла
+load_dotenv()
 import tempfile
 import asyncio
 import traceback
