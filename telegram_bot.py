@@ -9,6 +9,8 @@ Telegram бот для обработки аудиофайлов
 import os
 import sys
 import json
+import logging
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Загружаем переменные из .env файла
@@ -18,6 +20,17 @@ import asyncio
 import traceback
 from pathlib import Path
 from typing import Optional
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)-8s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 from telegram import Update, MessageEntity
 from telegram.ext import (
@@ -56,7 +69,9 @@ TEMP_DIR.mkdir(exist_ok=True)
 
 def get_whisper_model():
     """Получить модель Whisper с определением устройства"""
+    logger.info(f"Загрузка модели Whisper: {WHISPER_MODEL}")
     device = "cuda" if torch and torch.cuda.is_available() else "cpu"
+    logger.info(f"Используемое устройство: {device}")
     return whisper.load_model(WHISPER_MODEL, device=device)
 
 
@@ -65,19 +80,24 @@ def transcribe_audio(audio_path: str, lang: str = "ru") -> dict:
     if whisper is None:
         raise ImportError("Whisper не установлен")
     
+    logger.info(f"Начинается транскрипция аудио: {audio_path}")
     model = get_whisper_model()
     result = model.transcribe(audio_path, language=lang)
+    logger.info("Транскрипция завершена")
     return result
 
 
 def diarize_audio(audio_path: str, whisper_json: str, max_speakers: int = 12) -> Optional[dict]:
     """Диаризация спикеров с помощью NeMo"""
     if EncDecSpeakerLabelModel is None:
-        print("NeMo не установлен, пропускаем диаризацию")
+        logger.info("NeMo не установлен, пропускаем диаризацию")
         return None
+    
+    logger.info("Начинается диаризация спикеров...")
     
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"Используемое устройство для диаризации: {device}")
         repo = "nvidia/speakerverification_en_titanet_large"
         
         model = EncDecSpeakerLabelModel.from_pretrained(repo)
@@ -92,6 +112,7 @@ def diarize_audio(audio_path: str, whisper_json: str, max_speakers: int = 12) ->
         spk_cnt = len(set(labels))
         
         diar = merge_segments(stamps, labels)
+        logger.info(f"Обнаружено спикеров: {spk_cnt}")
         
         # Слияние с транскрипцией Whisper
         with open(whisper_json, encoding="utf-8") as f:
@@ -106,10 +127,11 @@ def diarize_audio(audio_path: str, whisper_json: str, max_speakers: int = 12) ->
             )
             tagged.append({**seg, "speaker": spk})
         
+        logger.info("Диаризация завершена")
         return tagged
     
     except Exception as e:
-        print(f"Ошибка диаризации: {e}")
+        logger.error(f"Ошибка диаризации: {e}")
         return None
 
 
@@ -195,6 +217,9 @@ def generate_summary(text: str, model: str = "gemma3:27b", timeout: int = 120) -
     """Генерация саммари через Ollama API"""
     import requests
     
+    logger.info(f"Начинается генерация саммари (модель: {model})")
+    logger.info(f"Длина текста для саммари: {len(text)} символов")
+    
     system_prompt = """Ты мой эффективный AI-ассистент по анализу стенограмм совещаний и лекций.
 
 Сделай из текста структурированное саммари на русском языке. В саммари обязательно выдели следующие пункты (можно использовать маркированные списки):
@@ -228,15 +253,16 @@ def generate_summary(text: str, model: str = "gemma3:27b", timeout: int = 120) -
         response = requests.post(url, json=payload, timeout=(10, timeout))  # (connect_timeout, read_timeout)
         response.raise_for_status()
         result = response.json()
+        logger.info("Саммари успешно сгенерировано")
         return result.get("message", {}).get("content", "")
     except requests.exceptions.Timeout:
-        print(f"Ollama API timeout after {timeout} seconds")
+        logger.error(f"Ollama API timeout after {timeout} seconds")
         return None
     except requests.exceptions.ConnectionError:
-        print("Ollama API недоступен. Убедитесь, что Ollama запущен на http://localhost:11434")
+        logger.error("Ollama API недоступен. Убедитесь, что Ollama запущен на http://localhost:11434")
         return None
     except requests.exceptions.RequestException as e:
-        print(f"Ошибка Ollama API: {e}")
+        logger.error(f"Ошибка Ollama API: {e}")
         return None
 
 
@@ -247,6 +273,7 @@ def save_result_files(
     summary: Optional[str] = None
 ) -> dict:
     """Сохранение результатов в файлы"""
+    logger.info("Сохранение результатов в файлы...")
     base = Path(audio_path).stem
     base_path = Path(audio_path).parent / base
     
@@ -257,12 +284,14 @@ def save_result_files(
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(result["segments"], f, ensure_ascii=False, indent=2)
     files["json"] = json_path
+    logger.info(f"Сохранен JSON: {json_path}")
     
     # Сохраняем TXT
     txt_path = str(base_path) + ".txt"
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(result["text"])
     files["txt"] = txt_path
+    logger.info(f"Сохранен TXT: {txt_path}")
     
     # Сохраняем тегированный JSON (если есть диаризация)
     if tagged:
@@ -270,6 +299,7 @@ def save_result_files(
         with open(tagged_path, "w", encoding="utf-8") as f:
             json.dump(tagged, f, ensure_ascii=False, indent=2)
         files["tagged"] = tagged_path
+        logger.info(f"Сохранен тегированный JSON: {tagged_path}")
     
     # Сохраняем саммари (если есть)
     if summary:
@@ -289,7 +319,9 @@ def save_result_files(
         with open(summary_path, "w", encoding="utf-8") as f:
             f.write(content)
         files["summary"] = summary_path
+        logger.info(f"Сохранено саммари: {summary_path}")
     
+    logger.info(f"Сохранено файлов: {len(files)}")
     return files
 
 
@@ -303,11 +335,13 @@ async def send_result(
 ):
     """Отправка результатов пользователю"""
     chat_id = update.effective_chat.id
+    logger.info(f"Отправка результатов пользователю (chat_id: {chat_id})")
     
     # Отправляем транскрипцию (TXT)
     if "txt" in files:
         with open(files["txt"], "r", encoding="utf-8") as f:
             text = f.read()
+        logger.info(f"Транскрипция отправлена (длина: {len(text)} символов)")
         
         # Telegram имеет ограничение на длину сообщения (4096 символов)
         # Разбиваем на части
@@ -320,21 +354,32 @@ async def send_result(
     
     # Отправляем саммари
     if summary:
+        logger.info("Саммари отправлено")
         await context.bot.send_message(chat_id=chat_id, text=f"```md\n# Саммари:\n\n{summary}\n```", parse_mode="MarkdownV2")
     
     # Отправляем файлы
     if "json" in files:
+        logger.info("Файл JSON отправлен")
         await context.bot.send_document(chat_id=chat_id, document=open(files["json"], "rb"), filename="transcription.json")
     
     if "tagged" in files:
+        logger.info("Файл диаризации (tagged) отправлен")
         await context.bot.send_document(chat_id=chat_id, document=open(files["tagged"], "rb"), filename="diarized.json")
     
     if "summary" in files:
+        logger.info("Файл саммари отправлен")
         await context.bot.send_document(chat_id=chat_id, document=open(files["summary"], "rb"), filename="summary.md")
+    
+    logger.info("Все результаты отправлены пользователю")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start"""
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    
+    logger.info(f"Команда /start от пользователя (id: {user.id}, username: {user.username}, chat_id: {chat_id})")
+    
     welcome_message = """
 Привет! Я бот для обработки аудиофайлов.
 
@@ -355,7 +400,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 *Используйте /help для получения дополнительной информации.*
 """
     await context.bot.send_message(
-        chat_id=update.effective_chat.id,
+        chat_id=chat_id,
         text=welcome_message,
         parse_mode="Markdown"
     )
@@ -363,6 +408,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /help"""
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    
+    logger.info(f"Команда /help от пользователя (id: {user.id}, username: {user.username}, chat_id: {chat_id})")
+    
     help_message = """
 **Помощь**
 
@@ -382,7 +432,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 *Бот использует Whisper для транскрипции, NeMo для диаризации и Ollama для генерации саммари.*
 """
     await context.bot.send_message(
-        chat_id=update.effective_chat.id,
+        chat_id=chat_id,
         text=help_message,
         parse_mode="Markdown"
     )
@@ -391,6 +441,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка аудиофайла"""
     chat_id = update.effective_chat.id
+    
+    logger.info(f"Получен новый аудиофайл от пользователя (chat_id: {chat_id})")
     
     # Отправляем уведомление о начале обработки
     sent_message = await context.bot.send_message(
@@ -409,8 +461,10 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_extension = os.path.splitext(file.file_name)[1] if file.file_name else ".mp3"
         audio_path = str(TEMP_DIR / f"{chat_id}_{file.file_unique_id}{file_extension}")
         
+        logger.info(f"Скачивание аудио: {file.file_name} ({file.file_size} байт)")
         # Скачиваем
         await file_obj.download_to_drive(audio_path)
+        logger.info(f"Аудио скачано: {audio_path}")
         
         # Обновляем статус
         await context.bot.edit_message_text(
@@ -478,18 +532,25 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_id=sent_message.message_id,
             text=error_text
         )
-        print(f"Ошибка: {e}")
+        logger.error(f"Ошибка при обработке файла: {e}")
+        logger.error(f"Стек трейса: {error_trace}")
 
 
 def main():
     """Запуск бота"""
+    logger.info("=" * 60)
+    logger.info("🤖 Запуск Telegram бота для обработки аудиофайлов")
+    logger.info("=" * 60)
+    
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     
     if not token:
-        print("❌ Ошибка: TELEGRAM_BOT_TOKEN не установлен")
-        print("Пожалуйста, установите переменную окружения TELEGRAM_BOT_TOKEN")
-        print("Пример: export TELEGRAM_BOT_TOKEN='123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11'")
+        logger.error("❌ Ошибка: TELEGRAM_BOT_TOKEN не установлен")
+        logger.error("Пожалуйста, установите переменную окружения TELEGRAM_BOT_TOKEN")
+        logger.error("Пример: export TELEGRAM_BOT_TOKEN='123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11'")
         return
+    
+    logger.info("✅ Токен бота получен")
     
     # Создаем приложение с настройкой таймаута
     # Увеличенные таймауты для обработки долгих операций (транскрипция Whisper, диаризация NeMo)
@@ -500,6 +561,8 @@ def main():
         .read_timeout(3000)     # 5 минут на чтение (для долгих операций)
         .build()
     )
+    
+    logger.info("📦 Бот настроен, добавление обработчиков...")
     
     # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
@@ -512,8 +575,10 @@ def main():
         handle_audio
     ))
     
-    print("🤖 Бот запущен и работает...")
-    print("Нажмите Ctrl+C для остановки")
+    logger.info("✅ Обработчики добавлены")
+    logger.info("⏳ Запуск бота (polling)...")
+    logger.info("🤖 Бот запущен и работает. Ожидание сообщений...")
+    logger.info("Нажмите Ctrl+C для остановки")
     
     # Запускаем бота
     application.run_polling(allowed_updates=Update.ALL_TYPES)
