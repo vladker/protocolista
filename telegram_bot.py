@@ -44,6 +44,8 @@ from telegram.ext import (
 # Импортируем функции из существующих модулей
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import torch
+
 try:
     import whisper
 except ImportError:
@@ -51,7 +53,6 @@ except ImportError:
 
 try:
     from nemo.collections.asr.models import EncDecSpeakerLabelModel
-    import torch
     import numpy as np
     import librosa
 except ImportError:
