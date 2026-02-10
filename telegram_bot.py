@@ -388,13 +388,15 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Отправляем уведомление о начале обработки
     sent_message = await context.bot.send_message(
         chat_id=chat_id,
-        text="📥 Получил файл! Начинаю обработку...\n\nЭто может занять несколько минут."
+        text="📥 Получил файл! Начинаю обработку..."
     )
     
     try:
         # Скачиваем файл
         file = update.message.voice or update.message.audio or update.message.document
-        file_obj = await context.bot.get_file(file.file_id)
+        
+        # Используем timeout для загрузки файла (на случай медленного соединения)
+        file_obj = await context.bot.get_file(file.file_id, read_timeout=120)
         
         # Создаем уникальное имя для файла
         file_extension = os.path.splitext(file.file_name)[1] if file.file_name else ".mp3"
@@ -461,7 +463,9 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     except Exception as e:
-        error_text = f"❌ Ошибка при обработке файла: {str(e)}\n\n{traceback.format_exc()}"
+        error_msg = str(e)[:500]  # Ограничиваем сообщение об ошибке
+        error_trace = traceback.format_exc()[:1000]  # Ограничиваем стек трейс
+        error_text = f"❌ Ошибка при обработке файла:\n\n{error_msg}\n\n{error_trace}"
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=sent_message.message_id,
@@ -480,8 +484,14 @@ def main():
         print("Пример: export TELEGRAM_BOT_TOKEN='123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11'")
         return
     
-    # Создаем приложение
-    application = Application.builder().token(token).build()
+    # Создаем приложение с настройкой таймаута
+    application = (
+        Application.builder()
+        .token(token)
+        .connect_timeout(30)
+        .read_timeout(30)
+        .build()
+    )
     
     # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
