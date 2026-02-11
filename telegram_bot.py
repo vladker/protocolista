@@ -63,7 +63,8 @@ except ImportError:
 
 
 # Пути к моделям
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "medium")
+# По умолчанию используем base модель для меньшего потребления памяти
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
 DIARIZATION_MAX_SPEAKERS = int(os.environ.get("DIARIZATION_MAX_SPEAKERS", "12"))
 
 # Временная директория для обработки файлов
@@ -73,13 +74,55 @@ TEMP_DIR.mkdir(exist_ok=True)
 
 def get_whisper_model():
     """Получить модель Whisper с определением устройства"""
+    global WHISPER_MODEL
+    
     logger.info(f"Загрузка модели Whisper: {WHISPER_MODEL}")
     if torch is None:
         device = "cpu"
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    # Если используется CUDA, очищаем кэш перед загрузкой модели
+    if device == "cuda" and torch.cuda.is_available():
+        logger.info("Очистка кэша CUDA перед загрузкой модели...")
+        torch.cuda.empty_cache()
+    
     logger.info(f"Используемое устройство: {device}")
-    return whisper.load_model(WHISPER_MODEL, device=device)
+    
+    try:
+        return whisper.load_model(WHISPER_MODEL, device=device)
+    except RuntimeError as e:
+        if "CUDA" in str(e) and "out of memory" in str(e).lower():
+            logger.warning(f"Не хватает памяти GPU для модели {WHISPER_MODEL}, пробуем уменьшить размер модели...")
+            # Попытка загрузить меньшую модель
+            # Проверяем текущую модель в списке и начинаем с меньшей
+            if WHISPER_MODEL == "medium":
+                small_models = ["small", "base"]
+            elif WHISPER_MODEL == "small":
+                small_models = ["base"]
+            else:
+                small_models = ["base"]  # base - наименьшая модель
+            
+            for model_size in small_models:
+                logger.info(f"Попытка загрузить модель {model_size}...")
+                try:
+                    WHISPER_MODEL = model_size
+                    model = whisper.load_model(model_size, device=device)
+                    logger.info(f"Модель {model_size} загружена успешно")
+                    return model
+                except RuntimeError as inner_e:
+                    if "CUDA" not in str(inner_e) or "out of memory" not in str(inner_e).lower():
+                        logger.info(f"Модель {model_size} загружена успешно")
+                        WHISPER_MODEL = model_size
+                        return whisper.load_model(model_size, device=device)
+                    logger.warning(f"Не удалось загрузить модель {model_size}: {inner_e}")
+            
+            # Если все модели CUDA не работают, пробуем CPU
+            logger.warning("Все модели CUDA не работают, переключаемся на CPU...")
+            WHISPER_MODEL = WHISPER_MODEL  # Оставляем текущую модель
+            return whisper.load_model(WHISPER_MODEL, device="cpu")
+        else:
+            raise
 
 
 def transcribe_audio(audio_path: str, lang: str = "ru") -> dict:
@@ -103,6 +146,11 @@ def diarize_audio(audio_path: str, whisper_json: str, max_speakers: int = 12) ->
     if torch is None:
         logger.info("PyTorch не установлен, пропускаем диаризацию")
         return None
+    
+    # Очистка кэша CUDA перед диаризацией
+    if torch.cuda.is_available():
+        logger.info("Очистка кэша CUDA перед диаризацией...")
+        torch.cuda.empty_cache()
     
     logger.info("Начинается диаризация спикеров...")
     
