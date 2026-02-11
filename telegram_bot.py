@@ -44,7 +44,10 @@ from telegram.ext import (
 # Импортируем функции из существующих модулей
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 
 try:
     import whisper
@@ -71,7 +74,10 @@ TEMP_DIR.mkdir(exist_ok=True)
 def get_whisper_model():
     """Получить модель Whisper с определением устройства"""
     logger.info(f"Загрузка модели Whisper: {WHISPER_MODEL}")
-    device = "cuda" if torch and torch.cuda.is_available() else "cpu"
+    if torch is None:
+        device = "cpu"
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Используемое устройство: {device}")
     return whisper.load_model(WHISPER_MODEL, device=device)
 
@@ -92,6 +98,10 @@ def diarize_audio(audio_path: str, whisper_json: str, max_speakers: int = 12) ->
     """Диаризация спикеров с помощью NeMo"""
     if EncDecSpeakerLabelModel is None:
         logger.info("NeMo не установлен, пропускаем диаризацию")
+        return None
+    
+    if torch is None:
+        logger.info("PyTorch не установлен, пропускаем диаризацию")
         return None
     
     logger.info("Начинается диаризация спикеров...")
