@@ -41,6 +41,9 @@ from telegram.ext import (
     ContextTypes,
 )
 
+# Словарь для хранения обработанных данных пользователей
+user_data_store = {}
+
 # Импортируем функции из существующих модулей
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -576,10 +579,18 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if os.path.exists(file_path):
                 os.remove(file_path)
         
+        # Сохраняем данные пользователя для последующих команд
+        user_data_store[chat_id] = {
+            "files": files,
+            "tagged_json": tagged_path if tagged else None,
+            "result": result,
+            "tagged": tagged
+        }
+        
         # Финальное сообщение
         await context.bot.send_message(
             chat_id=chat_id,
-            text="✅ Обработка завершена! Результаты отправлены выше."
+            text="✅ Обработка завершена! Результаты отправлены выше.\n\nИспользуйте команды:\n- `/s2t` - расшифровка без спикеров\n- `/s2t_spk` - расшифровка со спикерами\n- `/md` - расшифровка в Markdown\n- `/list` - расшифровка со списками\n- `/summary` - сводный протокол в чат\n- `/summary_md` - сводный протокол в файл\n- `/protocol` - протокол встречи в чат\n- `/protocol_md` - протокол встречи в файл"
         )
     
     except Exception as e:
@@ -634,6 +645,20 @@ def main():
         handle_audio
     ))
     
+    # Добавляем команды обработки транскрипции
+    application.add_handler(CommandHandler("s2t", s2t_command))  # Расшифровка без спикеров
+    application.add_handler(CommandHandler("s2t_spk", s2t_spk_command))  # Расшифровка со спикерами
+    
+    # Добавляем команды форматирования в MD
+    application.add_handler(CommandHandler("md", md_command))  # Расшифровка в MD
+    application.add_handler(CommandHandler("list", list_command))  # Расшифровка со списками
+    
+    # Добавляем команды протоколов
+    application.add_handler(CommandHandler("summary", summary_command))  # Сводный протокол в чат
+    application.add_handler(CommandHandler("summary_md", summary_md_command))  # Сводный протокол в MD
+    application.add_handler(CommandHandler("protocol", protocol_command))  # Протокол в чат
+    application.add_handler(CommandHandler("protocol_md", protocol_md_command))  # Протокол в MD
+    
     logger.info("✅ Обработчики добавлены")
     logger.info("⏳ Запуск бота (polling)...")
     logger.info("🤖 Бот запущен и работает. Ожидание сообщений...")
@@ -641,6 +666,494 @@ def main():
     
     # Запускаем бота
     application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+async def s2t_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Команда /s2t - Расшифровать запись без указания говорящих
+    Получает расшифровку для последнего обработанного файла пользователя
+    """
+    chat_id = update.effective_chat.id
+    
+    if chat_id not in user_data_store:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Сначала отправьте аудиофайл для обработки."
+        )
+        return
+    
+    user_data = user_data_store[chat_id]
+    if "txt" not in user_data["files"]:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Расшифровка еще не готова. Отправьте аудиофайл для обработки."
+        )
+        return
+    
+    try:
+        with open(user_data["files"]["txt"], "r", encoding="utf-8") as f:
+            text = f.read()
+        
+        # Очищаем от указаний спикеров
+        clean_lines = []
+        for line in text.split("\n"):
+            # Убираем [Speaker1], [Speaker2] и т.д.
+            import re
+            line = re.sub(r'\[Speaker\d+\]\s*', '', line)
+            line = re.sub(r'\(.*?\):\s*', '', line)
+            clean_lines.append(line.strip())
+        
+        clean_text = "\n".join(clean_lines)
+        
+        # Отправляем расшифровку без спикеров
+        max_len = 4000
+        if len(clean_text) > max_len:
+            for i in range(0, len(clean_text), max_len):
+                await context.bot.send_message(chat_id=chat_id, text=clean_text[i:i + max_len])
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=f"```txt\n{clean_text}\n```", parse_mode="MarkdownV2")
+        
+        logger.info(f"Команда /s2t обработана для chat_id: {chat_id}")
+    
+    except Exception as e:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Ошибка при обработке команды /s2t: {e}"
+        )
+        logger.error(f"Ошибка /s2t: {e}")
+
+
+async def s2t_spk_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Команда /s2t_spk - Расшифровать запись с указанием говорящих
+    Получает тегированную расшифровку для последнего обработанного файла пользователя
+    """
+    chat_id = update.effective_chat.id
+    
+    if chat_id not in user_data_store:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Сначала отправьте аудиофайл для обработки."
+        )
+        return
+    
+    user_data = user_data_store[chat_id]
+    if "tagged" not in user_data["files"]:
+        # Пытаемся получить тегированную расшифровку
+        if not user_data.get("tagged_json"):
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="❌ Расшифровка со спикерами еще не готова. Отправьте аудиофайл для обработки."
+            )
+            return
+    else:
+        if "txt" not in user_data["files"]:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="❌ Расшифровка еще не готова. Отправьте аудиофайл для обработки."
+            )
+            return
+    
+    try:
+        # Проверяем, есть ли уже обработанная тегированная расшифровка
+        if "tagged_md" in user_data["files"]:
+            with open(user_data["files"]["tagged_md"], "r", encoding="utf-8") as f:
+                text = f.read()
+        else:
+            with open(user_data["files"]["txt"], "r", encoding="utf-8") as f:
+                text = f.read()
+        
+        # Отправляем расшифровку со спикерами
+        max_len = 4000
+        if len(text) > max_len:
+            for i in range(0, len(text), max_len):
+                await context.bot.send_message(chat_id=chat_id, text=text[i:i + max_len])
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=f"```txt\n{text}\n```", parse_mode="MarkdownV2")
+        
+        logger.info(f"Команда /s2t_spk обработана для chat_id: {chat_id}")
+    
+    except Exception as e:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Ошибка при обработке команды /s2t_spk: {e}"
+        )
+        logger.error(f"Ошибка /s2t_spk: {e}")
+
+
+async def md_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Команда /md - Отправить расшифровку в формате Markdown
+    Получает MD файл для последнего обработанного файла пользователя
+    """
+    chat_id = update.effective_chat.id
+    
+    if chat_id not in user_data_store:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Сначала отправьте аудиофайл для обработки."
+        )
+        return
+    
+    user_data = user_data_store[chat_id]
+    if "md" not in user_data["files"]:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ MD файл еще не готов. Отправьте аудиофайл для обработки."
+        )
+        return
+    
+    try:
+        with open(user_data["files"]["md"], "r", encoding="utf-8") as f:
+            text = f.read()
+        
+        # Отправляем Markdown
+        max_len = 4000
+        if len(text) > max_len:
+            for i in range(0, len(text), max_len):
+                await context.bot.send_message(chat_id=chat_id, text=f"```md\n{text[i:i + max_len]}\n```", parse_mode="MarkdownV2")
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=f"```md\n{text}\n```", parse_mode="MarkdownV2")
+        
+        logger.info(f"Команда /md обработана для chat_id: {chat_id}")
+    
+    except Exception as e:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Ошибка при обработке команды /md: {e}"
+        )
+        logger.error(f"Ошибка /md: {e}")
+
+
+async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Команда /list - Отправить расшифровку со списками в Markdown
+    Создает расшифровку с маркированными списками для последнего обработанного файла пользователя
+    """
+    chat_id = update.effective_chat.id
+    
+    if chat_id not in user_data_store:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Сначала отправьте аудиофайл для обработки."
+        )
+        return
+    
+    user_data = user_data_store[chat_id]
+    if "txt" not in user_data["files"]:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Расшифровка еще не готова. Отправьте аудиофайл для обработки."
+        )
+        return
+    
+    try:
+        with open(user_data["files"]["txt"], "r", encoding="utf-8") as f:
+            text = f.read()
+        
+        # Форматируем с маркированными списками
+        list_lines = []
+        for line in text.split("\n"):
+            line = line.strip()
+            if line:
+                # Добавляем маркер списка, если строка не пустая
+                import re
+                # Убираем указания спикеров для чистоты
+                clean_line = re.sub(r'\[Speaker\d+\]\s*', '', line)
+                clean_line = re.sub(r'\(.*?\):\s*', '', clean_line)
+                if clean_line:
+                    list_lines.append(f"- {clean_line}")
+        
+        list_text = "\n".join(list_lines)
+        
+        # Отправляем Markdown со списками
+        max_len = 4000
+        if len(list_text) > max_len:
+            for i in range(0, len(list_text), max_len):
+                await context.bot.send_message(chat_id=chat_id, text=f"```md\n{list_text[i:i + max_len]}\n```", parse_mode="MarkdownV2")
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=f"```md\n{list_text}\n```", parse_mode="MarkdownV2")
+        
+        logger.info(f"Команда /list обработана для chat_id: {chat_id}")
+    
+    except Exception as e:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Ошибка при обработке команды /list: {e}"
+        )
+        logger.error(f"Ошибка /list: {e}")
+
+
+async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Команда /summary - Выдать сводный протокол в чат
+    Получает саммари для последнего обработанного файла пользователя
+    """
+    chat_id = update.effective_chat.id
+    
+    if chat_id not in user_data_store:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Сначала отправьте аудиофайл для обработки."
+        )
+        return
+    
+    user_data = user_data_store[chat_id]
+    if "summary" not in user_data["files"]:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Сводный протокол еще не готов. Отправьте аудиофайл для обработки."
+        )
+        return
+    
+    try:
+        with open(user_data["files"]["summary"], "r", encoding="utf-8") as f:
+            text = f.read()
+        
+        # Отправляем сводный протокол
+        max_len = 4000
+        if len(text) > max_len:
+            for i in range(0, len(text), max_len):
+                await context.bot.send_message(chat_id=chat_id, text=f"```md\n{text[i:i + max_len]}\n```", parse_mode="MarkdownV2")
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=f"```md\n{text}\n```", parse_mode="MarkdownV2")
+        
+        logger.info(f"Команда /summary обработана для chat_id: {chat_id}")
+    
+    except Exception as e:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Ошибка при обработке команды /summary: {e}"
+        )
+        logger.error(f"Ошибка /summary: {e}")
+
+
+async def summary_md_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Команда /summary_md - Выдать сводный протокол в формате Markdown
+    Отправляет файл саммари как документ
+    """
+    chat_id = update.effective_chat.id
+    
+    if chat_id not in user_data_store:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Сначала отправьте аудиофайл для обработки."
+        )
+        return
+    
+    user_data = user_data_store[chat_id]
+    if "summary" not in user_data["files"]:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Сводный протокол еще не готов. Отправьте аудиофайл для обработки."
+        )
+        return
+    
+    try:
+        summary_path = user_data["files"]["summary"]
+        logger.info(f"Отправка файла саммари: {summary_path}")
+        await context.bot.send_document(
+            chat_id=chat_id,
+            document=open(summary_path, "rb"),
+            filename="summary.md"
+        )
+        logger.info(f"Команда /summary_md обработана для chat_id: {chat_id}")
+    
+    except Exception as e:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Ошибка при обработке команды /summary_md: {e}"
+        )
+        logger.error(f"Ошибка /summary_md: {e}")
+
+
+async def protocol_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Команда /protocol - Выдать протокол в чат на основе шаблона встречи
+    Генерирует протокол с использованием шаблона
+    """
+    chat_id = update.effective_chat.id
+    
+    if chat_id not in user_data_store:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Сначала отправьте аудиофайл для обработки."
+        )
+        return
+    
+    user_data = user_data_store[chat_id]
+    
+    try:
+        # Если есть тегированная расшифровка, используем её
+        if "tagged_json" in user_data:
+            tagged_path = user_data["tagged_json"]
+            with open(tagged_path, "r", encoding="utf-8") as f:
+                tagged = json.load(f)
+            
+            # Форматируем для генерации протокола
+            text_for_protocol = format_transcript(tagged)
+            
+            # Генерируем протокол через Ollama
+            protocol_text = generate_protocol(text_for_protocol)
+            
+            if protocol_text:
+                max_len = 4000
+                if len(protocol_text) > max_len:
+                    for i in range(0, len(protocol_text), max_len):
+                        await context.bot.send_message(chat_id=chat_id, text=f"```md\n{protocol_text[i:i + max_len]}\n```", parse_mode="MarkdownV2")
+                else:
+                    await context.bot.send_message(chat_id=chat_id, text=f"```md\n{protocol_text}\n```", parse_mode="MarkdownV2")
+            else:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="❌ Не удалось сгенерировать протокол."
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="❌ Нет данных для генерации протокола. Отправьте аудиофайл для обработки."
+            )
+    
+    except Exception as e:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Ошибка при обработке команды /protocol: {e}"
+        )
+        logger.error(f"Ошибка /protocol: {e}")
+
+
+async def protocol_md_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Команда /protocol_md - Выдать протокол в формате Markdown на основе шаблона встречи
+    Генерирует и отправляет файл протокола
+    """
+    chat_id = update.effective_chat.id
+    
+    if chat_id not in user_data_store:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Сначала отправьте аудиофайл для обработки."
+        )
+        return
+    
+    user_data = user_data_store[chat_id]
+    
+    try:
+        # Если есть тегированная расшифровка, используем её
+        if "tagged_json" in user_data:
+            tagged_path = user_data["tagged_json"]
+            with open(tagged_path, "r", encoding="utf-8") as f:
+                tagged = json.load(f)
+            
+            # Форматируем для генерации протокола
+            text_for_protocol = format_transcript(tagged)
+            
+            # Генерируем протокол через Ollama
+            protocol_text = generate_protocol(text_for_protocol)
+            
+            if protocol_text:
+                # Сохраняем протокол во временный файл
+                protocol_file = str(TEMP_DIR / f"protocol_{chat_id}.md")
+                with open(protocol_file, "w", encoding="utf-8") as f:
+                    f.write(protocol_text)
+                
+                # Отправляем файл
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=open(protocol_file, "rb"),
+                    filename="protocol.md"
+                )
+                
+                # Удаляем временный файл
+                os.remove(protocol_file)
+            else:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="❌ Не удалось сгенерировать протокол."
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="❌ Нет данных для генерации протокола. Отправьте аудиофайл для обработки."
+            )
+    
+    except Exception as e:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Ошибка при обработке команды /protocol_md: {e}"
+        )
+        logger.error(f"Ошибка /protocol_md: {e}")
+
+
+def generate_protocol(text: str, model: str = "gemma3:27b", timeout: int = 120) -> Optional[str]:
+    """Генерация протокола через Ollama API с шаблоном встречи"""
+    import requests
+    
+    logger.info(f"Начинается генерация протокола (модель: {model})")
+    logger.info(f"Длина текста для протокола: {len(text)} символов")
+    
+    system_prompt = """Ты - эксперт по оформлению протоколов встреч и совещаний.
+
+На основе транскрипции встречи создай официальный протокол на русском языке в формате Markdown.
+
+Формат протокола:
+# Протокол встречи
+
+## Дата и время
+[Указать дату и время встречи, если известны]
+
+## Участники
+[Указать участников встречи, если известны]
+
+## Повестка дня
+- [Перечислить пункты повестки]
+
+## Обсуждение
+[Описывать обсуждение по пунктам повестки]
+
+## Решения
+[Список принятых решений]
+
+## Задачи
+[Задачи с указанием ответственных и сроков]
+
+## Заключение
+[Итоги встречи]
+"""
+
+    url = "http://localhost:11434/api/chat"
+    
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": f"Транскрипция встречи:\n\n{text}"
+            }
+        ],
+        "stream": False
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=(10, timeout))
+        response.raise_for_status()
+        result = response.json()
+        logger.info("Протокол успешно сгенерирован")
+        return result.get("message", {}).get("content", "")
+    except requests.exceptions.Timeout:
+        logger.error(f"Ollama API timeout after {timeout} seconds")
+        return None
+    except requests.exceptions.ConnectionError:
+        logger.error("Ollama API недоступен. Убедитесь, что Ollama запущен на http://localhost:11434")
+        return None
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Ошибка Ollama API: {e}")
+        return None
 
 
 if __name__ == "__main__":
