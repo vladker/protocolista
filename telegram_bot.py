@@ -324,8 +324,11 @@ def generate_summary(text: str, model: str = "gemma3:27b", timeout: int = 120) -
     except requests.exceptions.ConnectionError:
         logger.error("Ollama API недоступен. Убедитесь, что Ollama запущен на http://localhost:11434")
         return None
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Ошибка Ollama API: {e}")
+    except httpx.ReadError:
+        logger.error("Ollama API недоступен. Убедитесь, что Ollama запущен на http://localhost:11434")
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка при запросе к Ollama API: {e}")
         return None
 
 
@@ -1166,8 +1169,11 @@ def generate_protocol(text: str, model: str = "gemma3:27b", timeout: int = 120) 
     except requests.exceptions.ConnectionError:
         logger.error("Ollama API недоступен. Убедитесь, что Ollama запущен на http://localhost:11434")
         return None
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Ошибка Ollama API: {e}")
+    except httpx.ReadError:
+        logger.error("Ollama API недоступен. Убедитесь, что Ollama запущен на http://localhost:11434")
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка при запросе к Ollama API: {e}")
         return None
 
 
