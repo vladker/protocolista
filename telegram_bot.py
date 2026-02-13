@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import logging
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -622,13 +623,27 @@ def main():
     
     logger.info("✅ Токен бота получен")
     
+    # Создаем настройки по умолчанию с увеличенными таймаутами
+    default_kwargs = {
+        "read_timeout": 180,
+        "write_timeout": 180,
+        "connect_timeout": 60,
+        "pool_timeout": 60,
+    }
+    
     # Создаем приложение с настройкой таймаута
     # Увеличенные таймауты для обработки долгих операций (транскрипция Whisper, диаризация NeMo)
     application = (
         Application.builder()
         .token(token)
-        .connect_timeout(600)   # 60 секунд на подключение
-        .read_timeout(3000)     # 5 минут на чтение (для долгих операций)
+        .connect_timeout(120)
+        .read_timeout(300)
+        .write_timeout(120)
+        .pool_timeout(120)
+        .get_updates_connect_timeout(120)
+        .get_updates_read_timeout(300)
+        .get_updates_write_timeout(120)
+        .get_updates_pool_timeout(120)
         .build()
     )
     
@@ -664,7 +679,7 @@ def main():
     logger.info("🤖 Бот запущен и работает. Ожидание сообщений...")
     logger.info("Нажмите Ctrl+C для остановки")
     
-    # Запускаем бота
+    # Запускаем бота (run_polling блокирует выполнение)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
