@@ -582,7 +582,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Сохраняем данные пользователя для последующих команд
         user_data_store[chat_id] = {
             "files": files,
-            "tagged_json": tagged_path if tagged else None,
+            "tagged_json": files.get("tagged") if "tagged" in files else None,
             "result": result,
             "tagged": tagged
         }
