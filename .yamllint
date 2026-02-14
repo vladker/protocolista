@@ -1,0 +1,34 @@
+# Конфигурация yamllint для проверки формата YAML
+
+extends: default
+
+rules:
+  line-length:
+    max: 120
+    level: warning
+  document-start:
+    present: true
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation:
+    spaces: 2
+  truthy:
+    allowed-values: ['true', 'false']
+    check-keys: false
+  braces:
+    max-spaces-inside: 1
+    min-spaces-inside: 0
+  brackets:
+    max-spaces-inside: 1
+    min-spaces-inside: 0
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: 1
+  commas:
+    max-spaces-before: 0
+    max-spaces-after: 1
+  hyphens:
+    max-spaces-before: 0
+    max-spaces-after: 1
+  key-duplicates: enable
+  key-ordering: enable

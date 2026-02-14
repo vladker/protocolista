@@ -1,10 +1,6 @@
-openai-whisper
-python-dotenv
-torch
-torchaudio
-nemo_toolkit
-librosa
-scikit-learn
-soundfile
-requests
-python-telegram-bot
+# Основные зависимости для Protocolista Telegram Bot
+python-dotenv>=1.0.0
+requests>=2.31.0
+numpy>=1.24.0
+scipy>=1.11.0
+scikit-learn>=1.3.0

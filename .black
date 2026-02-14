@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+# Настройки Black для форматирования кода
+# Этот файл переопределяет настройки из pyproject.toml
+
+# Для Telegram бота с типичными требованиями Python
+line-length = 120
+target-version = ['py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.git
+  | \.venv
+  | \.eggs
+  | \.tox
+  | \.pytest_cache
+  | \.mypy_cache
+  | build
+  | dist
+  | migrations
+  | node_modules
+)/
+'''

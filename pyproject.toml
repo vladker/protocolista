@@ -1,0 +1,118 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "protocolista"
+version = "1.0.0"
+description = "Telegram bot for audio processing (Whisper, NeMo, Ollama)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Vladker"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+keywords = ["telegram", "bot", "whisper", "audio", "transcription", "diarization"]
+
+dependencies = [
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
+    "scikit-learn>=1.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.21.1",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "flake8>=6.1.0",
+    "pylint>=3.0.3",
+    "mypy>=1.6.1",
+    "bandit>=1.7.6",
+    "black>=23.12.0",
+    "isort>=5.13.2",
+    "pre-commit>=3.6.0",
+    "types-requests>=2.31.0",
+    "types-python-dotenv>=1.0.0",
+]
+
+test = [
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.21.1",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/vladker/protocolista"
+Documentation = "https://github.com/vladker/protocolista#readme"
+Repository = "https://github.com/vladker/protocolista.git"
+
+[tool.setuptools]
+packages = ["protocolista"]
+package-dir = {"" = "."}
+
+[tool.setuptools.package-data]
+protocolista = ["*.env"]
+
+[tool.black]
+line-length = 120
+target-version = ['py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | \.eggs
+  | \.tox
+  | \.pytest_cache
+  | \.mypy_cache
+  | build
+  | dist
+  | migrations
+  | node_modules
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 120
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+skip_gitignore = true
+skip = [".venv", ".tox", "venv"]
+
+[tool.pylint.messages_control]
+disable = [
+    "C0111",  # missing-docstring
+    "C0103",  # invalid-name
+    "R0913",  # too-many-arguments
+    "R0914",  # too-many-locals
+    "R0915",  # too-many-statements
+    "W0212",  # protected-access
+]
+
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.pylint.basic]
+good-names = ["i", "j", "k", "ex", "Run", "_"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "venv", ".venv", ".tox"]
