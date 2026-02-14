@@ -21,6 +21,8 @@ import asyncio
 import traceback
 from pathlib import Path
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
+from functools import wraps
 
 # Настройка логирования
 logging.basicConfig(
@@ -501,6 +503,30 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def process_audio_async(audio_path: str, lang: str = "ru") -> dict:
+    """Асинхронная транскрипция аудио с помощью Whisper"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, transcribe_audio, audio_path, lang)
+
+
+async def diarize_audio_async(audio_path: str, whisper_json: str, max_speakers: int = 12) -> Optional[dict]:
+    """Асинхронная диаризация спикеров с помощью NeMo"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, diarize_audio, audio_path, whisper_json, max_speakers)
+
+
+async def generate_summary_async(text: str, model: str = "gemma3:27b", timeout: int = 120) -> Optional[str]:
+    """Асинхронная генерация саммари через Ollama API"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, generate_summary, text, model, timeout)
+
+
+async def generate_protocol_async(text: str, model: str = "gemma3:27b", timeout: int = 120) -> Optional[str]:
+    """Асинхронная генерация протокола через Ollama API"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, generate_protocol, text, model, timeout)
+
+
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка аудиофайла"""
     chat_id = update.effective_chat.id
@@ -536,8 +562,8 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="🎤 Транскрибирую аудио (Whisper)... Это может занять несколько минут."
         )
         
-        # Транскрипция
-        result = transcribe_audio(audio_path, lang="ru")
+        # Транскрипция (асинхронно)
+        result = await process_audio_async(audio_path, lang="ru")
         
         # Обновляем статус
         await context.bot.edit_message_text(
@@ -546,11 +572,11 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="👥 Разделяю речь по спикерам (NeMo)... (опционально)"
         )
         
-        # Диаризация (опционально)
+        # Диаризация (асинхронно, опционально)
         whisper_json = audio_path.replace(file_extension, ".json")
         tagged = None
         if EncDecSpeakerLabelModel is not None:
-            tagged = diarize_audio(audio_path, whisper_json, DIARIZATION_MAX_SPEAKERS)
+            tagged = await diarize_audio_async(audio_path, whisper_json, DIARIZATION_MAX_SPEAKERS)
         
         # Обновляем статус
         await context.bot.edit_message_text(
@@ -559,13 +585,13 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="📝 Генерирую саммари (Ollama)... (опционально)"
         )
         
-        # Генерация саммари (опционально)
+        # Генерация саммари (асинхронно, опционально)
         summary = None
         if tagged:
             text_for_summary = format_transcript(tagged)
-            summary = generate_summary(text_for_summary)
+            summary = await generate_summary_async(text_for_summary)
         
-        # Сохраняем файлы
+        # Сохраняем файлы (в основном потоке)
         files = save_result_files(audio_path, result, tagged, summary)
         
         # Удаляем исходный файл
@@ -1009,8 +1035,8 @@ async def protocol_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Форматируем для генерации протокола
             text_for_protocol = format_transcript(tagged)
             
-            # Генерируем протокол через Ollama
-            protocol_text = generate_protocol(text_for_protocol)
+            # Генерируем протокол асинхронно через Ollama
+            protocol_text = await generate_protocol_async(text_for_protocol)
             
             if protocol_text:
                 max_len = 4000
@@ -1064,8 +1090,8 @@ async def protocol_md_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Форматируем для генерации протокола
             text_for_protocol = format_transcript(tagged)
             
-            # Генерируем протокол через Ollama
-            protocol_text = generate_protocol(text_for_protocol)
+            # Генерируем протокол асинхронно через Ollama
+            protocol_text = await generate_protocol_async(text_for_protocol)
             
             if protocol_text:
                 # Сохраняем протокол во временный файл
