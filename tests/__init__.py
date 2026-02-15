@@ -1,1 +1,1 @@
-# Пустой файл для превращения директории в пакет
+# Tests for Protocolista Telegram Bot

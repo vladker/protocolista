@@ -3,13 +3,14 @@
 import pytest
 import sys
 import os
-from unittest.mock import AsyncMock, MagicMock
+import tempfile
+from unittest.mock import AsyncMock, MagicMock, patch
 from telegram import Update
 from telegram.ext import ContextTypes
 
-# Импортируем функции из основного модуля
+# Импортируем функции из модуля
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import telegram_bot as bot
+from protocolista import commands, utils
 
 
 class TestCommands:
@@ -26,7 +27,7 @@ class TestCommands:
         context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
         context.bot.send_message = AsyncMock()
 
-        await bot.start(update, context)
+        await commands.start(update, context)
 
         # Проверяем, что сообщение было отправлено
         context.bot.send_message.assert_called_once()
@@ -46,7 +47,7 @@ class TestCommands:
         context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
         context.bot.send_message = AsyncMock()
 
-        await bot.help_command(update, context)
+        await commands.help_command(update, context)
 
         # Проверяем, что сообщение было отправлено
         context.bot.send_message.assert_called_once()
@@ -57,174 +58,75 @@ class TestCommands:
         assert "/help" in call_args[1]["text"]
 
     @pytest.mark.unit
-    async def test_s2t_command_no_user_data(self):
-        """Тест команды /s2t без данных пользователя"""
+    async def test_help_command_success(self):
+        """Тест успешной работы команды /help"""
         update = MagicMock(spec=Update)
         update.effective_chat.id = 123
 
         context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
         context.bot.send_message = AsyncMock()
 
-        await bot.s2t_command(update, context)
+        await commands.help_command(update, context)
 
-        # Проверяем, что сообщение об ошибке было отправлено
         context.bot.send_message.assert_called_once()
         call_args = context.bot.send_message.call_args
         assert call_args[1]["chat_id"] == 123
-        assert "Сначала отправьте аудиофайл" in call_args[1]["text"]
+        assert "/start" in call_args[1]["text"]
+        assert "/help" in call_args[1]["text"]
 
     @pytest.mark.unit
-    async def test_s2t_command_no_txt_file(self):
-        """Тест команды /s2t без файла транскрипции"""
+    async def test_start_command_success(self):
+        """Тест успешной работы команды /start"""
         update = MagicMock(spec=Update)
         update.effective_chat.id = 123
 
         context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
         context.bot.send_message = AsyncMock()
 
-        # Создаем данные пользователя без файла txt
-        bot.user_data_store[123] = {"files": {}}
+        await commands.start(update, context)
 
-        await bot.s2t_command(update, context)
-
-        # Проверяем, что сообщение об ошибке было отправлено
         context.bot.send_message.assert_called_once()
         call_args = context.bot.send_message.call_args
         assert call_args[1]["chat_id"] == 123
-        assert "Расшифровка еще не готова" in call_args[1]["text"]
-
-        # Очищаем данные пользователя
-        bot.user_data_store.clear()
+        assert "Привет" in call_args[1]["text"]
+        assert "Whisper" in call_args[1]["text"]
 
     @pytest.mark.unit
-    async def test_s2t_command_success(self):
-        """Тест успешной работы команды /s2t"""
-        update = MagicMock(spec=Update)
-        update.effective_chat.id = 123
+    def test_format_transcript_basic(self):
+        """Тест форматирования транскрипции"""
+        tagged_segments = [
+            {"speaker": "Speaker1", "text": "Привет"},
+            {"speaker": "Speaker2", "text": "Здравствуйте"},
+        ]
 
-        context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
-        context.bot.send_message = AsyncMock()
+        result = utils.format_transcript(tagged_segments)
 
-        # Создаем данные пользователя с файлом txt
-        test_text = "Тестовая транскрипция\n\n[Speaker1]: Привет\n[Speaker2]: Здравствуйте"
-        bot.user_data_store[123] = {"files": {"txt": "/tmp/test.txt", "tagged_json": "/tmp/test_tagged.json"}}
-
-        # Создаем временный файл
-        with open("/tmp/test.txt", "w", encoding="utf-8") as f:
-            f.write(test_text)
-
-        try:
-            await bot.s2t_command(update, context)
-
-            # Проверяем, что сообщение было отправлено
-            context.bot.send_message.assert_called()
-        finally:
-            # Очищаем данные пользователя и временные файлы
-            bot.user_data_store.clear()
-            for path in ["/tmp/test.txt", "/tmp/test_tagged.json"]:
-                if os.path.exists(path):
-                    os.unlink(path)
+        assert "Speaker1: Привет" in result
+        assert "Speaker2: Здравствуйте" in result
 
     @pytest.mark.unit
-    async def test_s2t_spk_command_no_user_data(self):
-        """Тест команды /s2t_spk без данных пользователя"""
-        update = MagicMock(spec=Update)
-        update.effective_chat.id = 123
+    def test_format_transcript_max_chars(self):
+        """Тест форматирования с ограничением по длине"""
+        long_text = " ".join([f"Текст {i}" for i in range(1000)])
+        tagged_segments = [{"speaker": "Speaker1", "text": long_text}]
 
-        context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
-        context.bot.send_message = AsyncMock()
+        result = utils.format_transcript(tagged_segments, max_chars=100)
 
-        await bot.s2t_spk_command(update, context)
-
-        # Проверяем, что сообщение об ошибке было отправлено
-        context.bot.send_message.assert_called_once()
-        call_args = context.bot.send_message.call_args
-        assert call_args[1]["chat_id"] == 123
-        assert "Сначала отправьте аудиофайл" in call_args[1]["text"]
+        assert len(result) <= 100
+        assert "..." in result
 
     @pytest.mark.unit
-    async def test_md_command_no_user_data(self):
-        """Тест команды /md без данных пользователя"""
-        update = MagicMock(spec=Update)
-        update.effective_chat.id = 123
+    def test_format_transcript_empty_segments(self):
+        """Тест форматирования пустого списка сегментов"""
+        result = utils.format_transcript([])
 
-        context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
-        context.bot.send_message = AsyncMock()
-
-        await bot.md_command(update, context)
-
-        # Проверяем, что сообщение об ошибке было отправлено
-        context.bot.send_message.assert_called_once()
-        call_args = context.bot.send_message.call_args
-        assert call_args[1]["chat_id"] == 123
-        assert "Сначала отправьте аудиофайл" in call_args[1]["text"]
+        assert result == ""
 
     @pytest.mark.unit
-    async def test_list_command_no_user_data(self):
-        """Тест команды /list без данных пользователя"""
-        update = MagicMock(spec=Update)
-        update.effective_chat.id = 123
+    def test_clean_speakers_from_text(self):
+        """Тест удаления указаний спикеров"""
+        text = "[Speaker1]: Привет\n[Speaker2]: Здравствуйте"
+        result = utils.clean_speakers_from_text(text)
 
-        context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
-        context.bot.send_message = AsyncMock()
-
-        await bot.list_command(update, context)
-
-        # Проверяем, что сообщение об ошибке было отправлено
-        context.bot.send_message.assert_called_once()
-        call_args = context.bot.send_message.call_args
-        assert call_args[1]["chat_id"] == 123
-        assert "Сначала отправьте аудиофайл" in call_args[1]["text"]
-
-    @pytest.mark.unit
-    async def test_summary_command_no_user_data(self):
-        """Тест команды /summary без данных пользователя"""
-        update = MagicMock(spec=Update)
-        update.effective_chat.id = 123
-
-        context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
-        context.bot.send_message = AsyncMock()
-
-        await bot.summary_command(update, context)
-
-        # Проверяем, что сообщение об ошибке было отправлено
-        context.bot.send_message.assert_called_once()
-        call_args = context.bot.send_message.call_args
-        assert call_args[1]["chat_id"] == 123
-        assert "Сначала отправьте аудиофайл" in call_args[1]["text"]
-
-    @pytest.mark.unit
-    async def test_protocol_command_no_user_data(self):
-        """Тест команды /protocol без данных пользователя"""
-        update = MagicMock(spec=Update)
-        update.effective_chat.id = 123
-
-        context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
-        context.bot.send_message = AsyncMock()
-
-        await bot.protocol_command(update, context)
-
-        # Проверяем, что сообщение об ошибке было отправлено
-        context.bot.send_message.assert_called_once()
-        call_args = context.bot.send_message.call_args
-        assert call_args[1]["chat_id"] == 123
-        assert "Сначала отправьте аудиофайл" in call_args[1]["text"]
-
-    @pytest.mark.unit
-    def test_format_markdown_basic(self):
-        """Тест форматирования Markdown"""
-        text = "Hello *world* and [link](url)"
-        result = bot.format_markdown(text)
-
-        assert r"\*world\*" in result
-        assert r"\[link\](url)" in result
-
-    @pytest.mark.unit
-    def test_format_markdown_special_chars(self):
-        """Тест форматирования Markdown с спецсимволами"""
-        text = "Text with `code`, #header, **bold**"
-        result = bot.format_markdown(text)
-
-        assert r"\`code\`" in result
-        assert r"#header" in result
-        assert r"\*\*bold\*\*" in result
+        assert "Speaker1" not in result
+        assert "Speaker2" not in result

@@ -4,3 +4,14 @@ requests>=2.31.0
 numpy>=1.24.0
 scipy>=1.11.0
 scikit-learn>=1.3.0
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# Whisper (необязательно, для транскрипции)
+openai-whisper>=20231117
+
+# NeMo (необязательно, для диаризации)
+# nemo-toolkit[collections]>=1.0.0
+
+# PyTorch (необязательно, для диаризации)
+# torch>=2.0.0

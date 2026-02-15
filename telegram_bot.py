@@ -16,7 +16,6 @@ from dotenv import load_dotenv
 
 # Загружаем переменные из .env файла
 load_dotenv()
-import tempfile
 import asyncio
 import traceback
 from pathlib import Path
@@ -33,7 +32,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from telegram import Update, MessageEntity
+from telegram import Update
 from telegram.error import NetworkError
 from telegram.ext import (
     Application,
@@ -201,7 +200,6 @@ def diarize_audio(audio_path: str, whisper_json: str, max_speakers: int = 12) ->
 def extract_embeddings(wav, sr, model, win_s=3.0, step_s=1.5):
     """Извлечение эмбеддингов из аудио"""
     import soundfile as sf
-    import tempfile
 
     embs, stamps = [], []
     t = 0.0
@@ -1131,9 +1129,6 @@ def format_markdown(text: str) -> str:
     text = re.sub(r"([_*\[\]()~`>#+\-=|{}.!])", r"\\\1", text)
     return text
 
-
-# Убедимся, что импорт re доступен глобально
-import re
 
 if __name__ == "__main__":
     main()
